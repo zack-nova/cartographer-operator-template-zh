@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cartographer-operator-template-zh/rolling-decisions.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rolling_paths", "exclude_paths"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "rolling_paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "exclude_paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

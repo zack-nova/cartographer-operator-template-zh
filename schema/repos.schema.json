@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cartographer-operator-template-zh/repos.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "defaults", "repos"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clone_root",
+        "analysis_root",
+        "output_root",
+        "plan_root",
+        "report_root",
+        "continue_on_error",
+        "auto_approve"
+      ],
+      "properties": {
+        "clone_root": { "type": "string", "minLength": 1 },
+        "analysis_root": { "type": "string", "minLength": 1 },
+        "output_root": { "type": "string", "minLength": 1 },
+        "plan_root": { "type": "string", "minLength": 1 },
+        "report_root": { "type": "string", "minLength": 1 },
+        "continue_on_error": { "type": "boolean" },
+        "auto_approve": { "type": "boolean" }
+      }
+    },
+    "repos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repo_locator", "target_slug"],
+        "properties": {
+          "repo_locator": { "type": "string", "minLength": 1 },
+          "ref": { "type": "string", "minLength": 1 },
+          "target_slug": { "type": "string", "minLength": 1 },
+          "harness_id": { "type": "string", "minLength": 1 },
+          "orbit_id": { "type": "string", "minLength": 1 },
+          "exclude_paths": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "rolling_paths": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  }
+}

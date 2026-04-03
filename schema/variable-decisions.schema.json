@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cartographer-operator-template-zh/variable-decisions.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "variables"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "variables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "replacements"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "replacements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "literal"],
+              "properties": {
+                "path": { "type": "string", "minLength": 1 },
+                "literal": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

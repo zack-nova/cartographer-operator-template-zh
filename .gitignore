@@ -1,0 +1,12 @@
+node_modules/
+
+work/cache/clones/*
+!work/cache/clones/README.md
+work/analysis/*
+!work/analysis/README.md
+work/output/*
+!work/output/README.md
+work/plans/*
+!work/plans/README.md
+work/reports/*
+!work/reports/README.md

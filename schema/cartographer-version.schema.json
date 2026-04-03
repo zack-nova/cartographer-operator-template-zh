@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cartographer-operator-template-zh/cartographer-version.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_repo",
+    "source_commit",
+    "source_entry",
+    "bundled_at",
+    "bundle_name",
+    "cartographer_version"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "source_repo": { "type": "string", "minLength": 1 },
+    "source_commit": { "type": "string", "minLength": 1 },
+    "source_entry": { "type": "string", "minLength": 1 },
+    "bundled_at": { "type": "string", "minLength": 1 },
+    "bundle_name": { "type": "string", "minLength": 1 },
+    "cartographer_version": { "type": "string", "minLength": 1 },
+    "sha256": { "type": "string", "minLength": 1 },
+    "notes": { "type": "string", "minLength": 1 }
+  }
+}

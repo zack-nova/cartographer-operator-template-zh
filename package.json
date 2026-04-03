@@ -1,0 +1,20 @@
+{
+  "name": "cartographer-operator-template-zh",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node ./scripts/build-tools.mjs",
+    "pretest": "npm run build",
+    "test": "node --test ./tests/*.test.mjs"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.2"
+  }
+}

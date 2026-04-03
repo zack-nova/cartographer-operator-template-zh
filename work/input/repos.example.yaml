@@ -1,0 +1,18 @@
+schema_version: 1
+defaults:
+  clone_root: ./work/cache/clones
+  analysis_root: ./work/analysis
+  output_root: ./work/output
+  plan_root: ./work/plans
+  report_root: ./work/reports
+  continue_on_error: true
+  auto_approve: true
+repos:
+  - repo_locator: git@github.com:org/repo-a.git
+    ref: main
+    target_slug: repo-a
+    harness_id: repo-a
+    orbit_id: workspace
+    exclude_paths: []
+    rolling_paths: []
+

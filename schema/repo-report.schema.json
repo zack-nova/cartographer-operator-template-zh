@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cartographer-operator-template-zh/repo-report.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "batchId",
+    "targetSlug",
+    "repoLocator",
+    "ref",
+    "status",
+    "startedAt",
+    "finishedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "batchId": { "type": "string", "minLength": 1 },
+    "targetSlug": { "type": "string", "minLength": 1 },
+    "repoLocator": { "type": "string", "minLength": 1 },
+    "ref": { "type": ["string", "null"] },
+    "status": {
+      "enum": [
+        "success",
+        "failed_precondition",
+        "failed_clone",
+        "failed_checkout",
+        "failed_bootstrap",
+        "failed_validation"
+      ]
+    },
+    "startedAt": { "type": "string", "minLength": 1 },
+    "finishedAt": { "type": "string", "minLength": 1 },
+    "cloneDir": { "type": "string", "minLength": 1 },
+    "outputDir": { "type": "string", "minLength": 1 },
+    "planPath": { "type": "string", "minLength": 1 },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

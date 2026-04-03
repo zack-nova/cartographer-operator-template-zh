@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cartographer-operator-template-zh/discovery-graph.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "discovery"],
+  "properties": {
+    "source": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["repoLocator", "resolvedRef", "commit", "rootDir"],
+      "properties": {
+        "repoLocator": { "type": "string", "minLength": 1 },
+        "requestedRef": { "type": ["string", "null"] },
+        "resolvedRef": { "type": "string", "minLength": 1 },
+        "commit": { "type": "string", "minLength": 1 },
+        "rootDir": { "type": "string", "minLength": 1 }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seedPaths", "discoveredPaths", "edges"],
+      "properties": {
+        "seedPaths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "discoveredPaths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "to", "kind"],
+            "properties": {
+              "from": { "type": "string", "minLength": 1 },
+              "to": { "type": "string", "minLength": 1 },
+              "kind": { "const": "markdown_link" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
