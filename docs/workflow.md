@@ -5,6 +5,7 @@
 1. 如果有必要，先把原始任务描述记录到 `work/input/request.md`
 2. 把任务整理成 `work/input/repos.yaml`
    如果请求里已经包含明确的 repo locator，可使用 `node ./tools/run-batch.mjs normalize --request work/input/request.md --output work/input/repos.yaml`
+   `normalize` 支持单句里唯一且明确的 locator，但 bullet 列表仍然更稳定
 3. 运行 `node ./tools/run-batch.mjs validate-input --input work/input/repos.yaml --json`
 4. 运行 `node ./tools/run-batch.mjs prepare --input work/input/repos.yaml`
 5. 审阅 `work/analysis/<batch-id>/<target-slug>/`
@@ -22,7 +23,9 @@ agent 的高价值工作：
 
 实现说明：
 
-- 远程 locator 会自动 clone 到批次级缓存目录
+- 远程 locator 会自动 clone 到批次级缓存目录；默认优先浅克隆并输出 Git clone 进度
+- 对公开 GitHub 仓库，如果 SSH locator 不可用，可安全改成等价 HTTPS 只读 locator
 - 本地 locator 在未指定 `ref` 时直接读取原仓库
 - 本地 locator 一旦指定了 `ref`，会先 clone 到批次缓存再 checkout，避免污染源仓库
-- `validate-input` 会在执行前发现重复 `target_slug` 并报告已有输出目录 warning
+- `validate-input` 会在执行前发现重复 `target_slug`、`work/input` 路径嵌套问题，并报告已有输出目录 warning
+- 如果根入口文档是 symlink，最终 materialize 时会解引用为正文内容

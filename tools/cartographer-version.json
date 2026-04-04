@@ -3,9 +3,9 @@
   "source_repo": "/Users/miles/Code/Vocation/cartographer",
   "source_commit": "1b1fd6ad368a242322240ea9d409269a6a810bc6",
   "source_entry": "scripts/dev.ts",
-  "bundled_at": "2026-04-03T08:20:20.819Z",
+  "bundled_at": "2026-04-04T01:57:56.917Z",
   "bundle_name": "cartographer-cli.mjs",
   "cartographer_version": "0.1.0",
-  "sha256": "ce885a4a80c40e2a97818a573687d618ce6d0264a9ad9978a08eb45f13549ed3",
+  "sha256": "f328876616f7c3d7b81f9b0b602784ad0491ae016392ba64616152ec4649bece",
   "notes": "基于 cartographer feature/foundations 生成的首版中文内嵌 operator bundle。"
 }

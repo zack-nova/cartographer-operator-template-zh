@@ -3217,8 +3217,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path6) {
-      let input = path6;
+    function removeDotSegments(path7) {
+      let input = path7;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3417,8 +3417,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path6, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path6 && path6 !== "/" ? path6 : void 0;
+        const [path7, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path7 && path7 !== "/" ? path7 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -7055,7 +7055,7 @@ var require__ = __commonJS({
 import { execFile as execFile2 } from "node:child_process";
 import { constants as constants2 } from "node:fs";
 import { access as access2, mkdir as mkdir2, readFile as readFile3, rm as rm2, writeFile } from "node:fs/promises";
-import path5 from "node:path";
+import path6 from "node:path";
 import { promisify as promisify2 } from "node:util";
 
 // src/lib/argv.mjs
@@ -7127,13 +7127,41 @@ var OutputValidationError = class extends Error {
 };
 
 // src/lib/git.mjs
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 var execFileAsync = promisify(execFile);
 function isRemoteLocator(repoLocator) {
   return /^(git@|ssh:\/\/|https?:\/\/)/.test(repoLocator);
+}
+function describeRemoteLocator(repoLocator) {
+  if (/^git@github\.com:/u.test(repoLocator) || /^ssh:\/\/git@github\.com\//u.test(repoLocator)) {
+    return {
+      type: "github_ssh",
+      retryHint: "\u5982\u679C\u5F53\u524D\u73AF\u5883\u6CA1\u6709 GitHub SSH \u51ED\u636E\uFF0C\u53EF\u6539\u7528\u7B49\u4EF7\u7684 HTTPS \u53EA\u8BFB locator \u91CD\u8BD5\u3002"
+    };
+  }
+  return {
+    type: "generic_remote",
+    retryHint: null
+  };
+}
+function buildRemoteCloneArgs({ repoLocator, cloneDir, ref }) {
+  if (ref !== void 0 && looksLikeBranchOrTag(ref)) {
+    return [
+      "clone",
+      "--depth",
+      "1",
+      "--branch",
+      ref,
+      "--single-branch",
+      "--progress",
+      repoLocator,
+      cloneDir
+    ];
+  }
+  return ["clone", "--depth", "1", "--progress", repoLocator, cloneDir];
 }
 async function resolveLocalRepoRoot(repoPath) {
   const result = await execFileAsync("git", ["-C", repoPath, "rev-parse", "--show-toplevel"]);
@@ -7154,23 +7182,82 @@ async function resolveRepoTask(batchContext, repoTask) {
   return cloneLocalRepoForRef(sourceRoot, repoTask, cloneDir);
 }
 async function cloneRemoteRepo(repoTask, cloneDir) {
+  const remoteInfo = describeRemoteLocator(repoTask.repo_locator);
+  let needsCheckout = repoTask.ref !== void 0 && !looksLikeBranchOrTag(repoTask.ref);
   try {
     await rm(cloneDir, { force: true, recursive: true });
     await mkdir(path.dirname(cloneDir), { recursive: true });
-    await execFileAsync("git", ["clone", repoTask.repo_locator, cloneDir]);
+    console.error(`\u6B63\u5728\u514B\u9686\u8FDC\u7A0B\u4ED3\u5E93\uFF1A${repoTask.repo_locator}`);
+    if (remoteInfo.retryHint !== null) {
+      console.error(`\u63D0\u793A\uFF1A${remoteInfo.retryHint}`);
+    }
+    await runGitClone(buildRemoteCloneArgs({
+      repoLocator: repoTask.repo_locator,
+      cloneDir,
+      ref: repoTask.ref
+    }));
   } catch (error) {
-    throw new SourceResolveError(
-      "clone",
-      `\u514B\u9686 ${repoTask.repo_locator} \u5931\u8D25\uFF1A${extractErrorMessage(error)}`
-    );
+    try {
+      await rm(cloneDir, { force: true, recursive: true });
+      await mkdir(path.dirname(cloneDir), { recursive: true });
+      console.error(`\u6D45\u514B\u9686\u5931\u8D25\uFF0C\u6B63\u5728\u56DE\u9000\u5230\u5B8C\u6574\u514B\u9686\uFF1A${repoTask.repo_locator}`);
+      await runGitClone(["clone", "--progress", repoTask.repo_locator, cloneDir]);
+      needsCheckout = repoTask.ref !== void 0;
+    } catch (fallbackError) {
+      throw new SourceResolveError(
+        "clone",
+        `\u514B\u9686 ${repoTask.repo_locator} \u5931\u8D25\uFF1A${extractErrorMessage(fallbackError)}${formatRetryHint(remoteInfo.retryHint)}`
+      );
+    }
   }
-  if (repoTask.ref !== void 0) {
+  if (repoTask.ref !== void 0 && needsCheckout) {
     await checkoutRef(cloneDir, repoTask.ref);
   }
   return {
     resolvedRepoPath: cloneDir,
     cloneDir
   };
+}
+async function runGitClone(args) {
+  await new Promise((resolve, reject) => {
+    const child = spawn("git", args, {
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_SSH_COMMAND: "ssh -o BatchMode=yes"
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      process.stdout.write(text);
+    });
+    child.stderr.on("data", (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      process.stderr.write(text);
+    });
+    child.on("error", (error) => {
+      reject(error);
+    });
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const error = new Error(`git ${args.join(" ")} exited with code ${code ?? "unknown"}`);
+      reject(Object.assign(error, { stdout, stderr }));
+    });
+  });
+}
+function formatRetryHint(retryHint) {
+  return retryHint === null ? "" : ` ${retryHint}`;
+}
+function looksLikeBranchOrTag(ref) {
+  return !/^[0-9a-f]{7,40}$/iu.test(ref);
 }
 async function cloneLocalRepoForRef(sourceRoot, repoTask, cloneDir) {
   try {
@@ -7339,17 +7426,17 @@ function visit(node, visitor) {
 visit.BREAK = BREAK;
 visit.SKIP = SKIP;
 visit.REMOVE = REMOVE;
-function visit_(key, node, visitor, path6) {
-  const ctrl = callVisitor(key, node, visitor, path6);
+function visit_(key, node, visitor, path7) {
+  const ctrl = callVisitor(key, node, visitor, path7);
   if (isNode(ctrl) || isPair(ctrl)) {
-    replaceNode(key, path6, ctrl);
-    return visit_(key, ctrl, visitor, path6);
+    replaceNode(key, path7, ctrl);
+    return visit_(key, ctrl, visitor, path7);
   }
   if (typeof ctrl !== "symbol") {
     if (isCollection(node)) {
-      path6 = Object.freeze(path6.concat(node));
+      path7 = Object.freeze(path7.concat(node));
       for (let i = 0; i < node.items.length; ++i) {
-        const ci = visit_(i, node.items[i], visitor, path6);
+        const ci = visit_(i, node.items[i], visitor, path7);
         if (typeof ci === "number")
           i = ci - 1;
         else if (ci === BREAK)
@@ -7360,13 +7447,13 @@ function visit_(key, node, visitor, path6) {
         }
       }
     } else if (isPair(node)) {
-      path6 = Object.freeze(path6.concat(node));
-      const ck = visit_("key", node.key, visitor, path6);
+      path7 = Object.freeze(path7.concat(node));
+      const ck = visit_("key", node.key, visitor, path7);
       if (ck === BREAK)
         return BREAK;
       else if (ck === REMOVE)
         node.key = null;
-      const cv = visit_("value", node.value, visitor, path6);
+      const cv = visit_("value", node.value, visitor, path7);
       if (cv === BREAK)
         return BREAK;
       else if (cv === REMOVE)
@@ -7387,17 +7474,17 @@ async function visitAsync(node, visitor) {
 visitAsync.BREAK = BREAK;
 visitAsync.SKIP = SKIP;
 visitAsync.REMOVE = REMOVE;
-async function visitAsync_(key, node, visitor, path6) {
-  const ctrl = await callVisitor(key, node, visitor, path6);
+async function visitAsync_(key, node, visitor, path7) {
+  const ctrl = await callVisitor(key, node, visitor, path7);
   if (isNode(ctrl) || isPair(ctrl)) {
-    replaceNode(key, path6, ctrl);
-    return visitAsync_(key, ctrl, visitor, path6);
+    replaceNode(key, path7, ctrl);
+    return visitAsync_(key, ctrl, visitor, path7);
   }
   if (typeof ctrl !== "symbol") {
     if (isCollection(node)) {
-      path6 = Object.freeze(path6.concat(node));
+      path7 = Object.freeze(path7.concat(node));
       for (let i = 0; i < node.items.length; ++i) {
-        const ci = await visitAsync_(i, node.items[i], visitor, path6);
+        const ci = await visitAsync_(i, node.items[i], visitor, path7);
         if (typeof ci === "number")
           i = ci - 1;
         else if (ci === BREAK)
@@ -7408,13 +7495,13 @@ async function visitAsync_(key, node, visitor, path6) {
         }
       }
     } else if (isPair(node)) {
-      path6 = Object.freeze(path6.concat(node));
-      const ck = await visitAsync_("key", node.key, visitor, path6);
+      path7 = Object.freeze(path7.concat(node));
+      const ck = await visitAsync_("key", node.key, visitor, path7);
       if (ck === BREAK)
         return BREAK;
       else if (ck === REMOVE)
         node.key = null;
-      const cv = await visitAsync_("value", node.value, visitor, path6);
+      const cv = await visitAsync_("value", node.value, visitor, path7);
       if (cv === BREAK)
         return BREAK;
       else if (cv === REMOVE)
@@ -7441,23 +7528,23 @@ function initVisitor(visitor) {
   }
   return visitor;
 }
-function callVisitor(key, node, visitor, path6) {
+function callVisitor(key, node, visitor, path7) {
   if (typeof visitor === "function")
-    return visitor(key, node, path6);
+    return visitor(key, node, path7);
   if (isMap(node))
-    return visitor.Map?.(key, node, path6);
+    return visitor.Map?.(key, node, path7);
   if (isSeq(node))
-    return visitor.Seq?.(key, node, path6);
+    return visitor.Seq?.(key, node, path7);
   if (isPair(node))
-    return visitor.Pair?.(key, node, path6);
+    return visitor.Pair?.(key, node, path7);
   if (isScalar(node))
-    return visitor.Scalar?.(key, node, path6);
+    return visitor.Scalar?.(key, node, path7);
   if (isAlias(node))
-    return visitor.Alias?.(key, node, path6);
+    return visitor.Alias?.(key, node, path7);
   return void 0;
 }
-function replaceNode(key, path6, node) {
-  const parent = path6[path6.length - 1];
+function replaceNode(key, path7, node) {
+  const parent = path7[path7.length - 1];
   if (isCollection(parent)) {
     parent.items[key] = node;
   } else if (isPair(parent)) {
@@ -7984,10 +8071,10 @@ function createNode(value, tagName, ctx) {
 }
 
 // node_modules/yaml/browser/dist/nodes/Collection.js
-function collectionFromPath(schema4, path6, value) {
+function collectionFromPath(schema4, path7, value) {
   let v = value;
-  for (let i = path6.length - 1; i >= 0; --i) {
-    const k = path6[i];
+  for (let i = path7.length - 1; i >= 0; --i) {
+    const k = path7[i];
     if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
       const a = [];
       a[k] = v;
@@ -8006,7 +8093,7 @@ function collectionFromPath(schema4, path6, value) {
     sourceObjects: /* @__PURE__ */ new Map()
   });
 }
-var isEmptyPath = (path6) => path6 == null || typeof path6 === "object" && !!path6[Symbol.iterator]().next().done;
+var isEmptyPath = (path7) => path7 == null || typeof path7 === "object" && !!path7[Symbol.iterator]().next().done;
 var Collection = class extends NodeBase {
   constructor(type, schema4) {
     super(type);
@@ -8036,11 +8123,11 @@ var Collection = class extends NodeBase {
    * be a Pair instance or a `{ key, value }` object, which may not have a key
    * that already exists in the map.
    */
-  addIn(path6, value) {
-    if (isEmptyPath(path6))
+  addIn(path7, value) {
+    if (isEmptyPath(path7))
       this.add(value);
     else {
-      const [key, ...rest] = path6;
+      const [key, ...rest] = path7;
       const node = this.get(key, true);
       if (isCollection(node))
         node.addIn(rest, value);
@@ -8054,8 +8141,8 @@ var Collection = class extends NodeBase {
    * Removes a value from the collection.
    * @returns `true` if the item was found and removed.
    */
-  deleteIn(path6) {
-    const [key, ...rest] = path6;
+  deleteIn(path7) {
+    const [key, ...rest] = path7;
     if (rest.length === 0)
       return this.delete(key);
     const node = this.get(key, true);
@@ -8069,8 +8156,8 @@ var Collection = class extends NodeBase {
    * scalar values from their surrounding node; to disable set `keepScalar` to
    * `true` (collections are always returned intact).
    */
-  getIn(path6, keepScalar) {
-    const [key, ...rest] = path6;
+  getIn(path7, keepScalar) {
+    const [key, ...rest] = path7;
     const node = this.get(key, true);
     if (rest.length === 0)
       return !keepScalar && isScalar(node) ? node.value : node;
@@ -8088,8 +8175,8 @@ var Collection = class extends NodeBase {
   /**
    * Checks if the collection includes a value with the key `key`.
    */
-  hasIn(path6) {
-    const [key, ...rest] = path6;
+  hasIn(path7) {
+    const [key, ...rest] = path7;
     if (rest.length === 0)
       return this.has(key);
     const node = this.get(key, true);
@@ -8099,8 +8186,8 @@ var Collection = class extends NodeBase {
    * Sets a value in this collection. For `!!set`, `value` needs to be a
    * boolean to add/remove the item from the set.
    */
-  setIn(path6, value) {
-    const [key, ...rest] = path6;
+  setIn(path7, value) {
+    const [key, ...rest] = path7;
     if (rest.length === 0) {
       this.set(key, value);
     } else {
@@ -10236,9 +10323,9 @@ var Document = class _Document {
       this.contents.add(value);
   }
   /** Adds a value to the document. */
-  addIn(path6, value) {
+  addIn(path7, value) {
     if (assertCollection(this.contents))
-      this.contents.addIn(path6, value);
+      this.contents.addIn(path7, value);
   }
   /**
    * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -10313,14 +10400,14 @@ var Document = class _Document {
    * Removes a value from the document.
    * @returns `true` if the item was found and removed.
    */
-  deleteIn(path6) {
-    if (isEmptyPath(path6)) {
+  deleteIn(path7) {
+    if (isEmptyPath(path7)) {
       if (this.contents == null)
         return false;
       this.contents = null;
       return true;
     }
-    return assertCollection(this.contents) ? this.contents.deleteIn(path6) : false;
+    return assertCollection(this.contents) ? this.contents.deleteIn(path7) : false;
   }
   /**
    * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -10335,10 +10422,10 @@ var Document = class _Document {
    * scalar values from their surrounding node; to disable set `keepScalar` to
    * `true` (collections are always returned intact).
    */
-  getIn(path6, keepScalar) {
-    if (isEmptyPath(path6))
+  getIn(path7, keepScalar) {
+    if (isEmptyPath(path7))
       return !keepScalar && isScalar(this.contents) ? this.contents.value : this.contents;
-    return isCollection(this.contents) ? this.contents.getIn(path6, keepScalar) : void 0;
+    return isCollection(this.contents) ? this.contents.getIn(path7, keepScalar) : void 0;
   }
   /**
    * Checks if the document includes a value with the key `key`.
@@ -10349,10 +10436,10 @@ var Document = class _Document {
   /**
    * Checks if the document includes a value at `path`.
    */
-  hasIn(path6) {
-    if (isEmptyPath(path6))
+  hasIn(path7) {
+    if (isEmptyPath(path7))
       return this.contents !== void 0;
-    return isCollection(this.contents) ? this.contents.hasIn(path6) : false;
+    return isCollection(this.contents) ? this.contents.hasIn(path7) : false;
   }
   /**
    * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -10369,13 +10456,13 @@ var Document = class _Document {
    * Sets a value in this document. For `!!set`, `value` needs to be a
    * boolean to add/remove the item from the set.
    */
-  setIn(path6, value) {
-    if (isEmptyPath(path6)) {
+  setIn(path7, value) {
+    if (isEmptyPath(path7)) {
       this.contents = value;
     } else if (this.contents == null) {
-      this.contents = collectionFromPath(this.schema, Array.from(path6), value);
+      this.contents = collectionFromPath(this.schema, Array.from(path7), value);
     } else if (assertCollection(this.contents)) {
-      this.contents.setIn(path6, value);
+      this.contents.setIn(path7, value);
     }
   }
   /**
@@ -11922,9 +12009,9 @@ function visit2(cst, visitor) {
 visit2.BREAK = BREAK2;
 visit2.SKIP = SKIP2;
 visit2.REMOVE = REMOVE2;
-visit2.itemAtPath = (cst, path6) => {
+visit2.itemAtPath = (cst, path7) => {
   let item = cst;
-  for (const [field, index] of path6) {
+  for (const [field, index] of path7) {
     const tok = item?.[field];
     if (tok && "items" in tok) {
       item = tok.items[index];
@@ -11933,23 +12020,23 @@ visit2.itemAtPath = (cst, path6) => {
   }
   return item;
 };
-visit2.parentCollection = (cst, path6) => {
-  const parent = visit2.itemAtPath(cst, path6.slice(0, -1));
-  const field = path6[path6.length - 1][0];
+visit2.parentCollection = (cst, path7) => {
+  const parent = visit2.itemAtPath(cst, path7.slice(0, -1));
+  const field = path7[path7.length - 1][0];
   const coll = parent?.[field];
   if (coll && "items" in coll)
     return coll;
   throw new Error("Parent collection not found");
 };
-function _visit(path6, item, visitor) {
-  let ctrl = visitor(item, path6);
+function _visit(path7, item, visitor) {
+  let ctrl = visitor(item, path7);
   if (typeof ctrl === "symbol")
     return ctrl;
   for (const field of ["key", "value"]) {
     const token = item[field];
     if (token && "items" in token) {
       for (let i = 0; i < token.items.length; ++i) {
-        const ci = _visit(Object.freeze(path6.concat([[field, i]])), token.items[i], visitor);
+        const ci = _visit(Object.freeze(path7.concat([[field, i]])), token.items[i], visitor);
         if (typeof ci === "number")
           i = ci - 1;
         else if (ci === BREAK2)
@@ -11960,10 +12047,10 @@ function _visit(path6, item, visitor) {
         }
       }
       if (typeof ctrl === "function" && field === "key")
-        ctrl = ctrl(item, path6);
+        ctrl = ctrl(item, path7);
     }
   }
-  return typeof ctrl === "function" ? ctrl(item, path6) : ctrl;
+  return typeof ctrl === "function" ? ctrl(item, path7) : ctrl;
 }
 
 // node_modules/yaml/browser/dist/parse/cst.js
@@ -13570,6 +13657,7 @@ async function loadAndValidateReposInput(inputFilePath, schemaRegistry) {
   );
   assertUniqueTargetSlugs(validated.repos);
   return {
+    inputFilePath,
     schemaVersion: validated.schema_version,
     defaults: {
       cloneRoot: resolvePathFromInput(inputFilePath, validated.defaults.clone_root),
@@ -13586,6 +13674,7 @@ async function loadAndValidateReposInput(inputFilePath, schemaRegistry) {
 async function inspectReposInput(reposInput) {
   const warnings = [];
   const repos = [];
+  const inputDir = path3.dirname(reposInput.inputFilePath);
   for (const repoTask of reposInput.repos) {
     const outputDir = path3.join(reposInput.defaults.outputRoot, repoTask.target_slug);
     const locatorType = isRemoteLocator(repoTask.repo_locator) ? "remote" : "local";
@@ -13614,6 +13703,10 @@ async function inspectReposInput(reposInput) {
       ...localRepoRoot === void 0 ? {} : { localRepoRoot }
     });
   }
+  warnings.push(
+    ...buildNestedInputWarnings(inputDir, reposInput.defaults)
+  );
+  warnings.push(...buildRemoteLocatorWarnings(reposInput.repos));
   return {
     repoCount: repos.length,
     warnings,
@@ -13640,8 +13733,41 @@ async function pathExists(filePath) {
     return false;
   }
 }
+function buildNestedInputWarnings(inputDir, defaults) {
+  const warnings = [];
+  const rootMappings = [
+    ["clone_root", defaults.cloneRoot],
+    ["analysis_root", defaults.analysisRoot],
+    ["output_root", defaults.outputRoot],
+    ["plan_root", defaults.planRoot],
+    ["report_root", defaults.reportRoot]
+  ];
+  for (const [label, absolutePath] of rootMappings) {
+    if (isNestedUnder(inputDir, absolutePath)) {
+      warnings.push(
+        `${label} \u89E3\u6790\u540E\u4F4D\u4E8E\u8F93\u5165\u76EE\u5F55\u4E0B\uFF1A${absolutePath}\u3002\u8FD9\u901A\u5E38\u8BF4\u660E repos.yaml \u91CC\u7684\u76F8\u5BF9\u8DEF\u5F84\u5199\u9519\u4E86\u3002`
+      );
+    }
+  }
+  return warnings;
+}
+function buildRemoteLocatorWarnings(repos) {
+  return repos.filter((repo) => isRemoteLocator(repo.repo_locator)).flatMap((repo) => {
+    if (/^git@github\.com:/u.test(repo.repo_locator)) {
+      return [
+        `${repo.target_slug} \u4F7F\u7528 GitHub SSH locator\uFF1B\u5982\u679C\u5F53\u524D\u73AF\u5883\u6CA1\u6709 SSH \u51ED\u636E\uFF0C\u53EF\u6539\u7528\u7B49\u4EF7 HTTPS \u53EA\u8BFB\u5730\u5740\u3002`
+      ];
+    }
+    return [];
+  });
+}
+function isNestedUnder(parentDir, childPath) {
+  const relativePath = path3.relative(parentDir, childPath);
+  return relativePath !== "" && !relativePath.startsWith("..") && !path3.isAbsolute(relativePath);
+}
 
 // src/lib/request-normalization.mjs
+import path4 from "node:path";
 var BULLET_LINE_PATTERN = /^\s*[-*]\s+(?<body>.+?)\s*$/u;
 var CODE_SPAN_PATTERN = /`([^`]+)`/gu;
 var REMOTE_LOCATOR_PATTERN = /(git@[^`\s]+|ssh:\/\/[^`\s]+|https?:\/\/[^`\s]+)/u;
@@ -13653,7 +13779,8 @@ var TARGET_BARE_PATTERN = /(?:\bas\b|\btarget_slug\b|\btarget\b)\s+([A-Za-z0-9._
 function normalizeRequestMarkdown(markdown, options = {}) {
   const repos = [];
   const seenTargetSlugs = /* @__PURE__ */ new Set();
-  for (const line of markdown.split(/\r?\n/u)) {
+  const lines = markdown.split(/\r?\n/u);
+  for (const line of lines) {
     const match = BULLET_LINE_PATTERN.exec(line);
     if (match?.groups?.body === void 0) {
       continue;
@@ -13679,6 +13806,12 @@ function normalizeRequestMarkdown(markdown, options = {}) {
     repos.push(normalizedRepo);
   }
   if (repos.length === 0) {
+    const proseRepo = extractSingleRepoFromMarkdown(markdown);
+    if (proseRepo !== null) {
+      repos.push(proseRepo);
+    }
+  }
+  if (repos.length === 0) {
     throw new Error(
       "\u5728 request markdown \u4E2D\u6CA1\u6709\u627E\u5230\u660E\u786E\u7684 repo locator\u3002\u8BF7\u4F7F\u7528\u5E26\u8FDC\u7A0B URL \u6216\u672C\u5730\u8DEF\u5F84\u7684 bullet \u884C\u3002"
     );
@@ -13686,15 +13819,26 @@ function normalizeRequestMarkdown(markdown, options = {}) {
   return {
     schema_version: 1,
     defaults: {
-      clone_root: "./work/cache/clones",
-      analysis_root: "./work/analysis",
-      output_root: "./work/output",
-      plan_root: "./work/plans",
-      report_root: "./work/reports",
+      ...options.defaults ?? {
+        clone_root: "./work/cache/clones",
+        analysis_root: "./work/analysis",
+        output_root: "./work/output",
+        plan_root: "./work/plans",
+        report_root: "./work/reports"
+      },
       continue_on_error: options.continueOnError ?? true,
       auto_approve: options.autoApprove ?? true
     },
     repos
+  };
+}
+function buildDefaultWorkPaths(outputFilePath, workspaceRoot = inferWorkspaceRootFromOutput(outputFilePath)) {
+  return {
+    clone_root: toRepoRelativePath(outputFilePath, workspaceRoot, "work/cache/clones"),
+    analysis_root: toRepoRelativePath(outputFilePath, workspaceRoot, "work/analysis"),
+    output_root: toRepoRelativePath(outputFilePath, workspaceRoot, "work/output"),
+    plan_root: toRepoRelativePath(outputFilePath, workspaceRoot, "work/plans"),
+    report_root: toRepoRelativePath(outputFilePath, workspaceRoot, "work/reports")
   };
 }
 function deriveTargetSlug(repoLocator) {
@@ -13724,28 +13868,65 @@ function extractExplicitTargetSlug(body) {
 function looksLikeRepoLocator(candidate) {
   return REMOTE_LOCATOR_PATTERN.test(candidate) || LOCAL_LOCATOR_PATTERN.test(candidate);
 }
+function extractSingleRepoFromMarkdown(markdown) {
+  const matches = [];
+  for (const line of markdown.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (trimmed === "" || BULLET_LINE_PATTERN.test(trimmed)) {
+      continue;
+    }
+    const repoLocator = extractRepoLocator(trimmed);
+    if (repoLocator === void 0) {
+      continue;
+    }
+    matches.push({
+      repo_locator: repoLocator,
+      target_slug: extractExplicitTargetSlug(trimmed) ?? deriveTargetSlug(repoLocator),
+      ...extractRef(trimmed) === void 0 ? {} : { ref: extractRef(trimmed) }
+    });
+  }
+  if (matches.length !== 1) {
+    return null;
+  }
+  return matches[0];
+}
+function inferWorkspaceRootFromOutput(outputFilePath) {
+  const normalizedOutputDir = path4.dirname(path4.resolve(outputFilePath));
+  const parentDir = path4.basename(normalizedOutputDir);
+  const grandparentDir = path4.basename(path4.dirname(normalizedOutputDir));
+  if (parentDir === "input" && grandparentDir === "work") {
+    return path4.resolve(normalizedOutputDir, "..", "..");
+  }
+  return path4.dirname(normalizedOutputDir);
+}
+function toRepoRelativePath(outputFilePath, workspaceRoot, targetRelativePath) {
+  const fromDir = path4.dirname(path4.resolve(outputFilePath));
+  const targetPath = path4.join(path4.resolve(workspaceRoot), targetRelativePath);
+  const relativePath = path4.relative(fromDir, targetPath);
+  return relativePath === "" ? "." : relativePath.split(path4.sep).join("/");
+}
 
 // src/lib/runtime-paths.mjs
-import path4 from "node:path";
+import path5 from "node:path";
 import { fileURLToPath } from "node:url";
 var ROOT_MARKERS = /* @__PURE__ */ new Set(["src", "tools", "tests", "scripts"]);
 function resolveRepoRoot(importMetaUrl) {
   const currentFilePath = fileURLToPath(importMetaUrl);
-  const currentDir = path4.dirname(currentFilePath);
-  const segments = currentDir.split(path4.sep);
+  const currentDir = path5.dirname(currentFilePath);
+  const segments = currentDir.split(path5.sep);
   const markerIndex = segments.findLastIndex((segment) => ROOT_MARKERS.has(segment));
   if (markerIndex === -1) {
-    return path4.resolve(currentDir, "..");
+    return path5.resolve(currentDir, "..");
   }
   const rootSegments = segments.slice(0, markerIndex);
-  return rootSegments.length === 0 ? path4.sep : rootSegments.join(path4.sep);
+  return rootSegments.length === 0 ? path5.sep : rootSegments.join(path5.sep);
 }
 function resolveRuntimePaths(importMetaUrl) {
   const repoRoot = resolveRepoRoot(importMetaUrl);
   return {
     repoRoot,
-    schemaDir: path4.join(repoRoot, "schema"),
-    toolsDir: path4.join(repoRoot, "tools")
+    schemaDir: path5.join(repoRoot, "schema"),
+    toolsDir: path5.join(repoRoot, "tools")
   };
 }
 
@@ -13780,8 +13961,8 @@ async function pathExists2(filePath) {
   }
 }
 async function normalizeRequestToReposFile(parsedArgv, schemaRegistry) {
-  const requestFilePath = path5.resolve(getRequiredFlagValue(parsedArgv, "request"));
-  const outputFilePath = path5.resolve(getRequiredFlagValue(parsedArgv, "output"));
+  const requestFilePath = path6.resolve(getRequiredFlagValue(parsedArgv, "request"));
+  const outputFilePath = path6.resolve(getRequiredFlagValue(parsedArgv, "output"));
   const overwrite = parsedArgv.booleans.has("overwrite");
   if (await pathExists2(outputFilePath) && !overwrite) {
     throw new Error(
@@ -13789,9 +13970,11 @@ async function normalizeRequestToReposFile(parsedArgv, schemaRegistry) {
     );
   }
   const requestMarkdown = await readFile3(requestFilePath, "utf8");
-  const reposInput = normalizeRequestMarkdown(requestMarkdown);
+  const reposInput = normalizeRequestMarkdown(requestMarkdown, {
+    defaults: buildDefaultWorkPaths(outputFilePath)
+  });
   assertSchemaValue(schemaRegistry, "repos.schema.json", reposInput, "\u6574\u7406\u540E\u7684 repos \u8F93\u5165");
-  await ensureDir(path5.dirname(outputFilePath));
+  await ensureDir(path6.dirname(outputFilePath));
   await writeFile(outputFilePath, renderYaml(reposInput), "utf8");
   return {
     requestPath: requestFilePath,
@@ -13800,7 +13983,7 @@ async function normalizeRequestToReposFile(parsedArgv, schemaRegistry) {
   };
 }
 async function validateInput(parsedArgv, schemaRegistry) {
-  const inputFilePath = path5.resolve(getRequiredFlagValue(parsedArgv, "input"));
+  const inputFilePath = path6.resolve(getRequiredFlagValue(parsedArgv, "input"));
   const reposInput = await loadAndValidateReposInput(inputFilePath, schemaRegistry);
   const inspection = await inspectReposInput(reposInput);
   return {
@@ -13813,13 +13996,13 @@ async function validateInput(parsedArgv, schemaRegistry) {
 }
 async function runCartographerJson(args) {
   const result = await execFileAsync2(process.execPath, [
-    path5.join(runtimePaths.toolsDir, "cartographer-cli.mjs"),
+    path6.join(runtimePaths.toolsDir, "cartographer-cli.mjs"),
     ...args
   ]);
   return JSON.parse(result.stdout);
 }
 async function writeDiscoveryAndDecisionTemplates(batchContext, repoTask, resolvedRepoPath, schemaRegistry) {
-  const analysisDir = path5.join(batchContext.analysisRoot, batchContext.batchId, repoTask.target_slug);
+  const analysisDir = path6.join(batchContext.analysisRoot, batchContext.batchId, repoTask.target_slug);
   await ensureDir(analysisDir);
   const discoverArgs = ["discover", "--repo", resolvedRepoPath, "--json"];
   if (repoTask.ref !== void 0) {
@@ -13833,12 +14016,12 @@ async function writeDiscoveryAndDecisionTemplates(batchContext, repoTask, resolv
     `${repoTask.target_slug} \u7684 discovery \u7ED3\u679C`
   );
   await writeFile(
-    path5.join(analysisDir, "discovery.json"),
+    path6.join(analysisDir, "discovery.json"),
     `${JSON.stringify(discoveryPayload, null, 2)}
 `,
     "utf8"
   );
-  const variablePath = path5.join(analysisDir, "variable-decisions.yaml");
+  const variablePath = path6.join(analysisDir, "variable-decisions.yaml");
   if (!await pathExists2(variablePath)) {
     await writeFile(
       variablePath,
@@ -13849,7 +14032,7 @@ async function writeDiscoveryAndDecisionTemplates(batchContext, repoTask, resolv
       "utf8"
     );
   }
-  const rollingPath = path5.join(analysisDir, "rolling-decisions.yaml");
+  const rollingPath = path6.join(analysisDir, "rolling-decisions.yaml");
   if (!await pathExists2(rollingPath)) {
     await writeFile(
       rollingPath,
@@ -13862,7 +14045,7 @@ async function writeDiscoveryAndDecisionTemplates(batchContext, repoTask, resolv
       "utf8"
     );
   }
-  const notesPath = path5.join(analysisDir, "curation-notes.md");
+  const notesPath = path6.join(analysisDir, "curation-notes.md");
   if (!await pathExists2(notesPath)) {
     await writeFile(
       notesPath,
@@ -13878,8 +14061,8 @@ async function writeDiscoveryAndDecisionTemplates(batchContext, repoTask, resolv
   }
 }
 async function loadDecisionFiles(analysisDir, schemaRegistry) {
-  const variableFile = path5.join(analysisDir, "variable-decisions.yaml");
-  const rollingFile = path5.join(analysisDir, "rolling-decisions.yaml");
+  const variableFile = path6.join(analysisDir, "variable-decisions.yaml");
+  const rollingFile = path6.join(analysisDir, "rolling-decisions.yaml");
   const variableRaw = await loadYamlFile(variableFile);
   const rollingRaw = await loadYamlFile(rollingFile);
   return {
@@ -13906,7 +14089,7 @@ async function validateMaterializedOutput(outputDir) {
     "AGENTS.md"
   ];
   for (const requiredFile of requiredFiles) {
-    const expectedPath = path5.join(outputDir, requiredFile);
+    const expectedPath = path6.join(outputDir, requiredFile);
     if (!await pathExists2(expectedPath)) {
       throw new OutputValidationError(
         `\u751F\u6210\u7ED3\u679C\u7F3A\u5C11\u5FC5\u9700\u6587\u4EF6 ${requiredFile}`
@@ -13921,9 +14104,9 @@ async function writeRepoReport(reportRoot, batchId, report, schemaRegistry) {
     report,
     `\u4ED3\u5E93\u62A5\u544A ${report.targetSlug}`
   );
-  const reportDir = path5.join(reportRoot, batchId);
+  const reportDir = path6.join(reportRoot, batchId);
   await ensureDir(reportDir);
-  const reportPath = path5.join(reportDir, `${report.targetSlug}.json`);
+  const reportPath = path6.join(reportDir, `${report.targetSlug}.json`);
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}
 `, "utf8");
   return reportPath;
@@ -13947,9 +14130,9 @@ function renderBatchSummary(batchId, reports) {
 `;
 }
 async function writeBatchSummary(reportRoot, batchId, reports) {
-  const reportDir = path5.join(reportRoot, batchId);
+  const reportDir = path6.join(reportRoot, batchId);
   await ensureDir(reportDir);
-  const summaryPath = path5.join(reportDir, "summary.md");
+  const summaryPath = path6.join(reportDir, "summary.md");
   await writeFile(summaryPath, renderBatchSummary(batchId, reports), "utf8");
   return summaryPath;
 }
@@ -13962,11 +14145,11 @@ function createReportBase(batchContext, repoTask, resolution) {
     ref: repoTask.ref ?? null,
     startedAt: (/* @__PURE__ */ new Date()).toISOString(),
     cloneDir: resolution?.cloneDir,
-    outputDir: path5.join(batchContext.outputRoot, repoTask.target_slug)
+    outputDir: path6.join(batchContext.outputRoot, repoTask.target_slug)
   };
 }
 async function prepareBatch(parsedArgv, schemaRegistry) {
-  const inputFilePath = path5.resolve(getRequiredFlagValue(parsedArgv, "input"));
+  const inputFilePath = path6.resolve(getRequiredFlagValue(parsedArgv, "input"));
   const reposInput = await loadAndValidateReposInput(inputFilePath, schemaRegistry);
   const batchId = getOptionalFlagValue(parsedArgv, "batch-id") ?? createBatchId();
   const batchContext = {
@@ -13986,7 +14169,7 @@ async function prepareBatch(parsedArgv, schemaRegistry) {
       );
     }
   } finally {
-    await rm2(path5.join(batchContext.cloneRoot, batchContext.batchId), {
+    await rm2(path6.join(batchContext.cloneRoot, batchContext.batchId), {
       force: true,
       recursive: true
     });
@@ -13997,7 +14180,7 @@ async function prepareBatch(parsedArgv, schemaRegistry) {
   };
 }
 async function runBatch(parsedArgv, schemaRegistry) {
-  const inputFilePath = path5.resolve(getRequiredFlagValue(parsedArgv, "input"));
+  const inputFilePath = path6.resolve(getRequiredFlagValue(parsedArgv, "input"));
   const confirmOverwrite = parsedArgv.booleans.has("confirm-overwrite");
   const reposInput = await loadAndValidateReposInput(inputFilePath, schemaRegistry);
   const batchId = getOptionalFlagValue(parsedArgv, "batch-id") ?? createBatchId();
@@ -14025,9 +14208,9 @@ async function runBatch(parsedArgv, schemaRegistry) {
           ...reportBase,
           cloneDir: resolution.cloneDir
         };
-        const analysisDir = path5.join(batchContext.analysisRoot, batchContext.batchId, repoTask.target_slug);
-        const outputDir = path5.join(batchContext.outputRoot, repoTask.target_slug);
-        const planPath = path5.join(batchContext.planRoot, batchContext.batchId, `${repoTask.target_slug}.json`);
+        const analysisDir = path6.join(batchContext.analysisRoot, batchContext.batchId, repoTask.target_slug);
+        const outputDir = path6.join(batchContext.outputRoot, repoTask.target_slug);
+        const planPath = path6.join(batchContext.planRoot, batchContext.batchId, `${repoTask.target_slug}.json`);
         const decisions = await loadDecisionFiles(analysisDir, schemaRegistry);
         if (await pathExists2(outputDir)) {
           if (!confirmOverwrite) {
@@ -14037,7 +14220,7 @@ async function runBatch(parsedArgv, schemaRegistry) {
           }
           await rm2(outputDir, { force: true, recursive: true });
         }
-        await ensureDir(path5.dirname(planPath));
+        await ensureDir(path6.dirname(planPath));
         const bootstrapArgs = [
           "bootstrap",
           "--repo",
@@ -14091,7 +14274,7 @@ async function runBatch(parsedArgv, schemaRegistry) {
       }
     }
   } finally {
-    await rm2(path5.join(batchContext.cloneRoot, batchContext.batchId), {
+    await rm2(path6.join(batchContext.cloneRoot, batchContext.batchId), {
       force: true,
       recursive: true
     });

@@ -16,7 +16,10 @@ import {
 } from "./lib/errors.mjs";
 import { resolveRepoTask } from "./lib/git.mjs";
 import { inspectReposInput, loadAndValidateReposInput } from "./lib/input-validation.mjs";
-import { normalizeRequestMarkdown } from "./lib/request-normalization.mjs";
+import {
+  buildDefaultWorkPaths,
+  normalizeRequestMarkdown,
+} from "./lib/request-normalization.mjs";
 import { resolveRuntimePaths } from "./lib/runtime-paths.mjs";
 import { assertSchemaValue, loadSchemaRegistry } from "./lib/schema-registry.mjs";
 import { loadYamlFile, renderYaml } from "./lib/yaml-file.mjs";
@@ -68,7 +71,9 @@ async function normalizeRequestToReposFile(parsedArgv, schemaRegistry) {
   }
 
   const requestMarkdown = await readFile(requestFilePath, "utf8");
-  const reposInput = normalizeRequestMarkdown(requestMarkdown);
+  const reposInput = normalizeRequestMarkdown(requestMarkdown, {
+    defaults: buildDefaultWorkPaths(outputFilePath),
+  });
   assertSchemaValue(schemaRegistry, "repos.schema.json", reposInput, "整理后的 repos 输入");
   await ensureDir(path.dirname(outputFilePath));
   await writeFile(outputFilePath, renderYaml(reposInput), "utf8");

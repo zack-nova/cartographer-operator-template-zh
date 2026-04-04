@@ -82,3 +82,36 @@ test("inspectReposInput warns when target output already exists", async () => {
   assert.equal(report.repos[0].locatorType, "local");
   assert.match(report.repos[0].localRepoRoot, /source-repo$/);
 });
+
+test("inspectReposInput warns when resolved work roots still point under work/input", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "cartographer-operator-input-"));
+  const localRepo = path.join(tempDir, "source-repo");
+  const reposPath = path.join(tempDir, "work", "input", "repos.yaml");
+
+  await mkdir(path.dirname(reposPath), { recursive: true });
+  await execFileAsync("git", ["init", localRepo]);
+
+  await writeFile(
+    reposPath,
+    [
+      "schema_version: 1",
+      "defaults:",
+      "  clone_root: ./work/cache/clones",
+      "  analysis_root: ./work/analysis",
+      "  output_root: ./work/output",
+      "  plan_root: ./work/plans",
+      "  report_root: ./work/reports",
+      "  continue_on_error: true",
+      "  auto_approve: true",
+      "repos:",
+      `  - repo_locator: ${JSON.stringify(localRepo)}`,
+      "    target_slug: source-repo"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const reposInput = await loadAndValidateReposInput(reposPath, await schemaRegistryPromise);
+  const report = await inspectReposInput(reposInput);
+
+  assert.ok(report.warnings.some((warning) => warning.includes("work/input")));
+});

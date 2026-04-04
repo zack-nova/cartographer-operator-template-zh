@@ -53,14 +53,18 @@
 
 - `normalize`
   - 把 `work/input/request.md` 中明确写出的 repo locator / ref / target slug 规范化为 `work/input/repos.yaml`
+  - 支持“单句里只有一个明确 locator”的保守提取
 - `validate-input`
   - 对 `repos.yaml` 做执行前审阅
   - 发现重复 `target_slug`
   - 提前报告已有输出目录 warning
+  - 提前报告路径误落到 `work/input/` 下的高概率配置错误
+  - 对 GitHub SSH locator 给出 HTTPS 重试提示
   - 校验本地 locator 是否真的是 Git 仓库
 - `prepare`
   - 自动处理本地/远程 source locator
   - 必要时 clone / checkout
+  - 远程仓库默认优先浅克隆并输出进度
   - 生成 `discovery.json`
   - 生成 `variable-decisions.yaml`
   - 生成 `rolling-decisions.yaml`
@@ -71,6 +75,7 @@
   - 生成 `work/output/`
   - 生成 `work/plans/`
   - 生成 `work/reports/`
+  - 对 symlink 形式的根入口文档按正文内容物化
 
 ### 4. Schema 与校验
 
@@ -133,7 +138,7 @@
 ### 2. 当前已知限制
 
 - `normalize` 不是自由自然语言理解器
-  - 它只处理显式 bullet 行中的远程 URL、本地路径、`on/ref/as` 语法
+  - 它仍然以显式 bullet 行为主；只有在整份请求里恰好存在一个明确 locator 时才会从普通句子中保守提取
 - 如果请求信息不明确，系统会 fail closed，而不是猜测
 - 当前批处理能力已经可用，但更偏“保守、可控”的原型实现
 

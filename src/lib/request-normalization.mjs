@@ -1,3 +1,5 @@
+import path from "node:path";
+
 const BULLET_LINE_PATTERN = /^\s*[-*]\s+(?<body>.+?)\s*$/u;
 const CODE_SPAN_PATTERN = /`([^`]+)`/gu;
 const REMOTE_LOCATOR_PATTERN = /(git@[^`\s]+|ssh:\/\/[^`\s]+|https?:\/\/[^`\s]+)/u;
@@ -11,7 +13,9 @@ export function normalizeRequestMarkdown(markdown, options = {}) {
   const repos = [];
   const seenTargetSlugs = new Set();
 
-  for (const line of markdown.split(/\r?\n/u)) {
+  const lines = markdown.split(/\r?\n/u);
+
+  for (const line of lines) {
     const match = BULLET_LINE_PATTERN.exec(line);
 
     if (match?.groups?.body === undefined) {
@@ -47,6 +51,14 @@ export function normalizeRequestMarkdown(markdown, options = {}) {
   }
 
   if (repos.length === 0) {
+    const proseRepo = extractSingleRepoFromMarkdown(markdown);
+
+    if (proseRepo !== null) {
+      repos.push(proseRepo);
+    }
+  }
+
+  if (repos.length === 0) {
     throw new Error(
       "在 request markdown 中没有找到明确的 repo locator。请使用带远程 URL 或本地路径的 bullet 行。"
     );
@@ -55,15 +67,30 @@ export function normalizeRequestMarkdown(markdown, options = {}) {
   return {
     schema_version: 1,
     defaults: {
-      clone_root: "./work/cache/clones",
-      analysis_root: "./work/analysis",
-      output_root: "./work/output",
-      plan_root: "./work/plans",
-      report_root: "./work/reports",
+      ...(options.defaults ?? {
+        clone_root: "./work/cache/clones",
+        analysis_root: "./work/analysis",
+        output_root: "./work/output",
+        plan_root: "./work/plans",
+        report_root: "./work/reports",
+      }),
       continue_on_error: options.continueOnError ?? true,
-      auto_approve: options.autoApprove ?? true
+      auto_approve: options.autoApprove ?? true,
     },
     repos
+  };
+}
+
+export function buildDefaultWorkPaths(
+  outputFilePath,
+  workspaceRoot = inferWorkspaceRootFromOutput(outputFilePath),
+) {
+  return {
+    clone_root: toRepoRelativePath(outputFilePath, workspaceRoot, "work/cache/clones"),
+    analysis_root: toRepoRelativePath(outputFilePath, workspaceRoot, "work/analysis"),
+    output_root: toRepoRelativePath(outputFilePath, workspaceRoot, "work/output"),
+    plan_root: toRepoRelativePath(outputFilePath, workspaceRoot, "work/plans"),
+    report_root: toRepoRelativePath(outputFilePath, workspaceRoot, "work/reports"),
   };
 }
 
@@ -107,4 +134,54 @@ function extractExplicitTargetSlug(body) {
 
 function looksLikeRepoLocator(candidate) {
   return REMOTE_LOCATOR_PATTERN.test(candidate) || LOCAL_LOCATOR_PATTERN.test(candidate);
+}
+
+function extractSingleRepoFromMarkdown(markdown) {
+  const matches = [];
+
+  for (const line of markdown.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+
+    if (trimmed === "" || BULLET_LINE_PATTERN.test(trimmed)) {
+      continue;
+    }
+
+    const repoLocator = extractRepoLocator(trimmed);
+
+    if (repoLocator === undefined) {
+      continue;
+    }
+
+    matches.push({
+      repo_locator: repoLocator,
+      target_slug: extractExplicitTargetSlug(trimmed) ?? deriveTargetSlug(repoLocator),
+      ...(extractRef(trimmed) === undefined ? {} : { ref: extractRef(trimmed) }),
+    });
+  }
+
+  if (matches.length !== 1) {
+    return null;
+  }
+
+  return matches[0];
+}
+
+function inferWorkspaceRootFromOutput(outputFilePath) {
+  const normalizedOutputDir = path.dirname(path.resolve(outputFilePath));
+  const parentDir = path.basename(normalizedOutputDir);
+  const grandparentDir = path.basename(path.dirname(normalizedOutputDir));
+
+  if (parentDir === "input" && grandparentDir === "work") {
+    return path.resolve(normalizedOutputDir, "..", "..");
+  }
+
+  return path.dirname(normalizedOutputDir);
+}
+
+function toRepoRelativePath(outputFilePath, workspaceRoot, targetRelativePath) {
+  const fromDir = path.dirname(path.resolve(outputFilePath));
+  const targetPath = path.join(path.resolve(workspaceRoot), targetRelativePath);
+  const relativePath = path.relative(fromDir, targetPath);
+
+  return relativePath === "" ? "." : relativePath.split(path.sep).join("/");
 }

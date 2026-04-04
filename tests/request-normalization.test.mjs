@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildDefaultWorkPaths,
   deriveTargetSlug,
   normalizeRequestMarkdown
 } from "../src/lib/request-normalization.mjs";
@@ -35,6 +36,19 @@ test("normalizeRequestMarkdown extracts explicit repo locators and refs from bul
   ]);
 });
 
+test("normalizeRequestMarkdown falls back to a single explicit locator in prose", () => {
+  const result = normalizeRequestMarkdown(
+    "帮我把 `git@github.com:entireio/cli.git` 这个仓库里的 harness 文档转换为 harness 模板。",
+  );
+
+  assert.deepEqual(result.repos, [
+    {
+      repo_locator: "git@github.com:entireio/cli.git",
+      target_slug: "cli",
+    },
+  ]);
+});
+
 test("normalizeRequestMarkdown fails closed on duplicate target slugs", () => {
   assert.throws(
     () =>
@@ -59,4 +73,18 @@ test("deriveTargetSlug strips .git and trailing separators", () => {
   assert.equal(deriveTargetSlug("git@github.com:org/example.git"), "example");
   assert.equal(deriveTargetSlug("https://github.com/org/example/"), "example");
   assert.equal(deriveTargetSlug("/absolute/path/to/example"), "example");
+});
+
+test("buildDefaultWorkPaths makes defaults relative to the repos file location", () => {
+  const defaults = buildDefaultWorkPaths(
+    "/tmp/harness-test/work/input/repos.yaml",
+  );
+
+  assert.deepEqual(defaults, {
+    clone_root: "../cache/clones",
+    analysis_root: "../analysis",
+    output_root: "../output",
+    plan_root: "../plans",
+    report_root: "../reports",
+  });
 });

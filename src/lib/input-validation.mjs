@@ -18,6 +18,7 @@ export async function loadAndValidateReposInput(inputFilePath, schemaRegistry) {
   assertUniqueTargetSlugs(validated.repos);
 
   return {
+    inputFilePath,
     schemaVersion: validated.schema_version,
     defaults: {
       cloneRoot: resolvePathFromInput(inputFilePath, validated.defaults.clone_root),
@@ -35,6 +36,7 @@ export async function loadAndValidateReposInput(inputFilePath, schemaRegistry) {
 export async function inspectReposInput(reposInput) {
   const warnings = [];
   const repos = [];
+  const inputDir = path.dirname(reposInput.inputFilePath);
 
   for (const repoTask of reposInput.repos) {
     const outputDir = path.join(reposInput.defaults.outputRoot, repoTask.target_slug);
@@ -68,6 +70,11 @@ export async function inspectReposInput(reposInput) {
     });
   }
 
+  warnings.push(
+    ...buildNestedInputWarnings(inputDir, reposInput.defaults),
+  );
+  warnings.push(...buildRemoteLocatorWarnings(reposInput.repos));
+
   return {
     repoCount: repos.length,
     warnings,
@@ -98,4 +105,44 @@ async function pathExists(filePath) {
   } catch {
     return false;
   }
+}
+
+function buildNestedInputWarnings(inputDir, defaults) {
+  const warnings = [];
+  const rootMappings = [
+    ["clone_root", defaults.cloneRoot],
+    ["analysis_root", defaults.analysisRoot],
+    ["output_root", defaults.outputRoot],
+    ["plan_root", defaults.planRoot],
+    ["report_root", defaults.reportRoot],
+  ];
+
+  for (const [label, absolutePath] of rootMappings) {
+    if (isNestedUnder(inputDir, absolutePath)) {
+      warnings.push(
+        `${label} 解析后位于输入目录下：${absolutePath}。这通常说明 repos.yaml 里的相对路径写错了。`,
+      );
+    }
+  }
+
+  return warnings;
+}
+
+function buildRemoteLocatorWarnings(repos) {
+  return repos
+    .filter((repo) => isRemoteLocator(repo.repo_locator))
+    .flatMap((repo) => {
+      if (/^git@github\.com:/u.test(repo.repo_locator)) {
+        return [
+          `${repo.target_slug} 使用 GitHub SSH locator；如果当前环境没有 SSH 凭据，可改用等价 HTTPS 只读地址。`,
+        ];
+      }
+
+      return [];
+    });
+}
+
+function isNestedUnder(parentDir, childPath) {
+  const relativePath = path.relative(parentDir, childPath);
+  return relativePath !== "" && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
 }

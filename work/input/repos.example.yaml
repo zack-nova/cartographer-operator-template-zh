@@ -1,10 +1,10 @@
 schema_version: 1
 defaults:
-  clone_root: ./work/cache/clones
-  analysis_root: ./work/analysis
-  output_root: ./work/output
-  plan_root: ./work/plans
-  report_root: ./work/reports
+  clone_root: ../cache/clones
+  analysis_root: ../analysis
+  output_root: ../output
+  plan_root: ../plans
+  report_root: ../reports
   continue_on_error: true
   auto_approve: true
 repos:
@@ -15,4 +15,3 @@ repos:
     orbit_id: workspace
     exclude_paths: []
     rolling_paths: []
-
